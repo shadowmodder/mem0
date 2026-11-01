@@ -81,6 +81,33 @@ class TestQdrant(unittest.TestCase):
             finally:
                 store.client.close()
 
+    def test_create_col_rejects_reused_collection_with_different_dims(self):
+        """A stale collection (created with another embedder's dims) must fail fast with a clear error."""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "qdrant")
+            first = Qdrant(collection_name="mem0", embedding_model_dims=64, path=path)
+            first.client.close()
+            del first
+
+            with self.assertRaises(ValueError) as ctx:
+                Qdrant(collection_name="mem0", embedding_model_dims=128, path=path)
+            self.assertIn("has dim 64", str(ctx.exception))
+            self.assertIn("embedding_model_dims=128", str(ctx.exception))
+
+    def test_create_col_reuses_collection_with_matching_dims(self):
+        """Reopening a collection with the same dims keeps working (no false positive)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "qdrant")
+            first = Qdrant(collection_name="mem0", embedding_model_dims=64, path=path)
+            first.client.close()
+            del first
+
+            second = Qdrant(collection_name="mem0", embedding_model_dims=64, path=path)
+            try:
+                self.assertTrue(second._has_bm25_slot)
+            finally:
+                second.client.close()
+
     def test_create_col(self):
         self.client_mock.get_collections.return_value = MagicMock(collections=[])
 

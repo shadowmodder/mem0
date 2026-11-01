@@ -142,6 +142,19 @@ class Qdrant(VectorStoreBase):
             logger.debug(f"BM25 encoding failed: {e}")
         return None
 
+    @staticmethod
+    def _existing_vector_dims(info) -> Optional[int]:
+        """Return the dense vector size of an existing collection, or None if unreadable."""
+        try:
+            vectors = info.config.params.vectors
+            # This store always creates a single unnamed dense vector; be
+            # defensive about named-vector maps all the same.
+            if isinstance(vectors, dict):
+                vectors = next(iter(vectors.values()), None)
+            return getattr(vectors, "size", None)
+        except Exception:
+            return None
+
     def create_col(self, vector_size: int, on_disk: bool, distance: Distance = Distance.COSINE):
         """
         Create a new collection with dense vectors and BM25 sparse vectors.
@@ -157,6 +170,19 @@ class Qdrant(VectorStoreBase):
             if collection.name == self.collection_name:
                 logger.debug(f"Collection {self.collection_name} already exists. Skipping creation.")
                 info = self.client.get_collection(self.collection_name)
+                existing_dims = self._existing_vector_dims(info)
+                if existing_dims is not None and existing_dims != vector_size:
+                    raise ValueError(
+                        f"Collection '{self.collection_name}' has dim {existing_dims}, "
+                        f"but embedding_model_dims={vector_size} was requested. The collection was likely "
+                        f"created with a different embedding model. Delete the collection or set a new "
+                        f"collection_name."
+                    )
+                if existing_dims is not None:
+                    logger.info(
+                        f"Reusing existing collection '{self.collection_name}' "
+                        f"(vector dim {existing_dims} matches)."
+                    )
                 sparse_cfg = info.config.params.sparse_vectors
                 self._has_bm25_slot = bool(sparse_cfg and "bm25" in sparse_cfg)
                 if not self._has_bm25_slot:
